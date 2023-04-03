@@ -1,0 +1,483 @@
+---
+title: "Financial Time Series Analysis HW 01"
+author: "Varshini Yanamandra"
+date: "2023-01-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(astsa)
+```
+
+Question 1 - part (d)
+
+```{r}
+# a belongs to chi-square with degrees-of-freedom 1
+# theta belongs to unif[0, 2*pi]
+# omega is pi/4]
+
+a.list <- rchisq(3, df = 1)
+theta.list <- runif(3, 0, 2*pi)
+
+f1 <- a.list[1] * cos(pi * (1:100)/4 + theta.list[1])
+par(mfrow = c(3, 1), mar = c(3, 2, 2, 1), cex.main = 1.5)  # help(par) for info
+plot.ts(f1, main = "Function 1")
+
+f1 <- a.list[2] * cos(pi * (1:100)/4 + theta.list[2])
+par(mfrow = c(3, 1), mar = c(3, 2, 2, 1), cex.main = 1.5)  # help(par) for info
+plot.ts(f1, main = "Function 2")
+
+f1 <- a.list[3] * cos(pi * (1:100)/4 + theta.list[3])
+par(mfrow = c(3, 1), mar = c(3, 2, 2, 1), cex.main = 1.5)  # help(par) for info
+plot.ts(f1, main = "Function 3")
+```
+
+All of the series have a seasonality of 5. The amplitude of the curves vary based on the value of A chosen from the chi-square distribution with 1 degree-of-freedom. All of the series have a constant mean and variance that remains constant with time. Hence, it can be concluded that all three series are stationary processes.
+
+Question 2
+
+```{r}
+us.covid <- as_tibble(read.table('uscovid22.txt', header = FALSE))
+colnames(us.covid) <- c("date", "cases")
+
+# cases are in millions; multiplying cases by 1,000,000
+us.covid$cases <- us.covid$cases * 1000000
+
+head(us.covid)
+
+# converting to time-series object
+covid.ts <- ts(us.covid$cases) # with frequency 1
+# the x-axis goes from 1 (Jan 1, 2022) to 365 (Dec 31, 2022)
+plot(covid.ts)
+```
+
+Part (a)
+
+```{r}
+us.covid$logcases <- log(us.covid$cases) # taking log-transformation on the number of cases
+head(us.covid)
+
+covid.ts <- ts(us.covid$logcases)
+plot(covid.ts, main = "Log Transformed Time Series", xlab = "Days", ylab = "Log number of cases")
+```
+
+The log transformation stabilized the variance by increasing the variance in the region after x = 50 and decreasing it in the region between x = 1 and x = 50 (approx.).
+
+Part (b)
+
+```{r}
+covid.ma <- stats::filter(covid.ts, rep(1/7, 7), sides = 2) # calculating the 7-day moving-average
+plot(covid.ma, ylim = c(8, 14), col = "red", main = "7-Day Moving Average of Log-Transformed Series", xlab = "Days", ylab = "Log number of cases")
+plot.new = TRUE
+lines(covid.ts, col = "darkblue") # simultaneously plotting the log-transformed series
+legend("topright", legend = c("MA trend", "log transformed trend"), col = c("red", "darkblue"), lty = 1)
+
+covid.r <- covid.ts - covid.ma # subtracting the moving average from the log-transformed series
+
+plot(covid.r, main = "Residuals", xlab = "Days", ylab = "Log number of cases") + abline(h = 0, col = "blue", lty = 2) # plotting the residuals
+```
+
+Part (c)
+
+```{r}
+n = length(covid.ts)
+covid.tr <- rep(0, n - 14)
+for (i in 8:(n-7)) {
+  covid.tr[i - 14] = sum(covid.ts[(i-7):(i+7)]) * 1/15 # (simply dividing the sum by (2q + 1) since the period is odd)
+}
+
+covid.detr <- covid.ts[8:(n-7)] - covid.tr
+plot(covid.detr, main = "Detrended Series", xlab = "Days", ylab = "Log Number of Tourists", type = 'l')
+```
+
+The de-trended series looks like it has a mean that is mostly constant. However, we can see a change in the mean during the time t = 50 to t = 130 (approx). We can conclude that the series is not likely to be stationary.
+
+Part (d)
+
+```{r}
+# estimating the seasonal components using the de-trended series
+plot(covid.detr, xlim = c(1, 30), type = 'l') + abline(v = c(8, 15, 22, 29), col = "red") # zooming into the graph and drawing vertical lines every 7 days
+```
+
+From this plot, we can tell that the seasonality of the given data is 7, meaning there is a pattern that repeats every 7 days (1 week) in the data. This could be because of the change in updation of data during the weekends, as employees wouldn't be working during the weekend.
+
+```{r}
+s = rep(0, 7)
+s[1] = mean(covid.detr[(0:49) * 7 + 1])
+s[2] = mean(covid.detr[(0:49) * 7 + 2])
+s[3] = mean(covid.detr[(0:49) * 7 + 3])
+s[4] = mean(covid.detr[(0:49) * 7 + 4])
+s[5] = mean(covid.detr[(0:49) * 7 + 5])
+s[6] = mean(covid.detr[(0:49) * 7 + 6])
+s[7] = mean(covid.detr[(0:49) * 7 + 7])
+
+s = s - mean(s)
+s = rep(s, 52)
+s[365] <- s[1] # adding one more entry since 7 * 52 = 364
+
+covid.ds <- covid.ts - s # removing the seasonality from the log-transformed series
+plot(covid.ds, main = "Deseasoned Series", xlab = "Days", ylab = "Log number of cases")
+```
+
+```{r}
+# re-estimating the trend using MA for the deseasoned series
+covid.dsma <- stats::filter(covid.ds, rep(1/7, 7), sides = 2) # calculating the 7-day moving-average
+plot(covid.dsma + s, ylim = c(8.5, 14.5), main = "7-Day MA Trend + Season Trend", xlab = "Days", ylab = "Log number of cases")
+plot.new = TRUE
+lines(covid.ts, col = "red") # simultaneously plotting the deseasoned series
+legend("topright", legend = c("MA + season trend", "log trend"), col = c(1, "red"), lty = 1)
+```
+
+Part (e)
+
+```{r}
+covid.dsdt <- covid.ts[8:(n-7)] - covid.tr - s[8:(n-7)] # removing the seasonality from the de-trended series
+plot(covid.dsdt, main = "Deseasoned and De-Trended Series", xlab = "Days", ylab = "Log number of cases", type = 'l')
+```
+
+Here, the mean is not constant and neither is the variance, so we can conclude that the series is non-statinary.
+
+Part (f)
+
+```{r}
+# plotting the sample autocorrelation function for covid.ma
+par(mar = c(5, 4, 5, 0)) # setting the margins
+acf(covid.ma[4:362], main = "Autocorrelations of the 7-Day MA Process")
+```
+
+Part (g)
+
+```{r}
+# testing whether autocorrelation (h = 1) is 0 at level 0.05
+Box.test(covid.ma[4:362], lag = 1, type = c("Ljung-Box"))
+```
+
+Since the p-value of the Ljung-Box test for lag = 1 is much smaller than 0.05, we can reject the null hypothesis that the autocorrelation at lag 1 is 0.
+
+Part (h)
+
+```{r}
+Box.test(covid.ma[4:362], lag = 2, type = c("Ljung-Box")) # lag 2
+Box.test(covid.ma[4:362], lag = 5, type = c("Ljung-Box")) # lag 5
+Box.test(covid.ma[4:362], lag = 10, type = c("Ljung-Box")) # lag 10
+Box.test(covid.ma[4:362], lag = 20, type = c("Ljung-Box")) # lag 20
+Box.test(covid.ma[4:362], lag = 50, type = c("Ljung-Box")) # lag 50
+Box.test(covid.ma[4:362], lag = 100, type = c("Ljung-Box")) # lag 100
+Box.test(covid.ma[4:362], lag = 200, type = c("Ljung-Box")) # lag 200
+```
+
+Question 3
+
+```{r}
+# monthly data record from January 1970 to December 1995
+hawaii <- as_tibble(read.table('hawaiinew.dat'))
+colnames(hawaii) <- c("yearmonth", "total", "westbound", "eastbound")
+head(hawaii, 3)
+```
+
+Part (a)
+
+```{r}
+total.ts <- ts(hawaii$total, start = 1970, frequency = 12)
+westbound.ts <- ts(hawaii$westbound, start = 1970, frequency = 12)
+eastbound.ts <- ts(hawaii$eastbound, start = 1970, frequency = 12)
+plot(total.ts, ylim = c(1e+04, 7e+05), main = "Number of Tourists Who Visited Hawaii", xlab = "Time", ylab = "Number of Tourists")
+plot.new = TRUE
+lines(westbound.ts, col = "blue")
+plot.new = TRUE
+lines(eastbound.ts, col = "red")
+legend("topleft", legend = c("total", "west-bound", "east-bound"), col = c(1, "blue", "red"), lty = 1)
+
+plot(total.ts[1:24], type = 'l', main = "Plot for Total Number of Tourists in 1970 and 1971")
+plot(westbound.ts[1:36], type = 'l', main = "Plot for Number of Westbound Tourists in 1970, 1971 and 1972")
+plot(eastbound.ts[1:24], type = 'l', main = "Plot for Number of Eastbound Tourists in 1970 and 1971")
+```
+
+Observations from the plot (just by seeing):
+1. The mean of both the number of west and east-bound tourists is increasing with time.
+2. The variance of all of the series increases with increase in the mean value.
+3. The number of east-bound tourists is higher than west-bound tourists at any given time.
+4. Tourism in Hawaii had an increasing trend from 1970 to around 1992. There is a slight decrease from 1992 to 1994, after which there was an increase.
+5. The total number of tourists (black) is the sum of the west (blue) and east-bound (red) tourists, so the three are linearly dependent.
+6. There is an obvious seasonal component that can be seen in the graph - tourism is highest in Hawaii in August and is the lowest in January. This makes sense, since many people might be travelling with their families during summer and summer vacations. This trend is valid for the total number of tourists and the number of east-bound tourists.
+7. There is a trend that repeats every 1 year, hence the seasonality is 12 (since the data we are given is monthly data).
+8. The trend for the west-bound tourists is not the same as the trend for the other two series. Here, the number of tourists rapidly decreases every year in September, after peaking in August, and increases again in October. However, the seasonality seems to be 12 here, as well, as there is a clear pattern that repeats every year.
+
+Part (b)
+
+```{r}
+hawaii$total <- log(hawaii$total) # log transformation
+total.logts <- ts(hawaii$total, frequency = 12, start = 1970)
+plot(total.logts, main = "Log Transformed Tourists in Hawaii from 1970 - 1995", ylab = "Total Number of Tourists", xlab = "Years") + abline(v = c(1986, 1987, 1988, 1989, 1990), col = "red")
+```
+
+Compared to the original plot, we can see that the variance of the data has been stabilized by taking the log transformation. The same increasing trend in tourism is observed from 1970 to 1992, after which there is a decrease till 1994 and increase from 1994 to 1995. The seasonality of 12 months (1 year) can also be clearly observed (red vertical lines have been drawn to clearly show the seasonality).
+
+Part (c)
+
+```{r}
+n = length(total.logts)
+tt <- 1:n
+total.fit.1 <- lm(total.logts ~ tt) # linear model
+summ.1 <- summary(total.fit.1)
+total.fit.10 <- lm(total.logts ~ 0 + tt) # linear model with no intercept
+summ.10 <- summary(total.fit.10)
+total.fit.2 <- lm(total.logts ~ I(tt^2) + tt) # quadratic model
+summ.2 <- summary(total.fit.2)
+## we can't square ss since '^' is not meaningful for factors
+total.fit.20 <- lm(total.logts ~ 0 + I(tt^2) + tt) # quadratic model with no intercept
+summ.20 <- summary(total.fit.20)
+total.fit.3 <- lm(total.logts ~ I(tt^3) + I(tt^2) + tt)
+summ.3 <- summary(total.fit.3)
+total.fit.30 <- lm(total.logts ~ 0 + I(tt^3) + I(tt^2) + tt) # cubic model with no intercept
+summ.30 <- summary(total.fit.30)
+total.fit.4 <- lm(total.logts ~ I(tt^4) + I(tt^3) + I(tt^2) + tt)
+summ.4 <- summary(total.fit.4)
+total.fit.40 <- lm(total.logts ~ 0 + I(tt^4) + I(tt^3) + I(tt^2) + tt) # biquadratic model with no intercept
+summ.40 <- summary(total.fit.40)
+total.fit.5 <- lm(total.logts ~ I(tt^5) + I(tt^4) + I(tt^3) + I(tt^2) + tt)
+summ.5 <- summary(total.fit.5)
+total.fit.50 <- lm(total.logts ~ 0 + I(tt^5) + I(tt^4) + I(tt^3) + I(tt^2) + tt) # 5th degree model with no intercept
+summ.50 <- summary(total.fit.50)
+total.fit.6 <- lm(total.logts ~ I(tt^6) + I(tt^5) + I(tt^4) + I(tt^3) + I(tt^2) + tt)
+summ.6 <- summary(total.fit.6)
+total.fit.60 <- lm(total.logts ~ 0 + I(tt^6) + I(tt^5) + I(tt^4) + I(tt^3) + I(tt^2) + tt) # 6th degree model with no intercept
+summ.60 <- summary(total.fit.60)
+total.fit.70 <- lm(total.logts ~ 0 + I(tt^7) + I(tt^6) + I(tt^5) + I(tt^4) + I(tt^3) + I(tt^2) + tt) # 7th degree model with no intercept
+summ.70 <- summary(total.fit.70)
+total.fit.13.0 <- lm(total.logts ~ 0 + I(tt^13) + I(tt^12) + I(tt^11) + I(tt^10) + I(tt^9) + I(tt^8) + I(tt^7) + I(tt^6) + I(tt^5) + I(tt^4) + I(tt^3) + I(tt^2) + tt) # 10th degree model with no intercept
+summ.13.0 <- summary(total.fit.13.0)
+total.fit.16.0 <- lm(total.logts ~ 0 + I(tt^16) + I(tt^15) + I(tt^14) + I(tt^13) + I(tt^12) + I(tt^11) + I(tt^10) + I(tt^9) + I(tt^8) + I(tt^7) + I(tt^6) + I(tt^5) + I(tt^4) + I(tt^3) + I(tt^2) + tt) # 10th degree model with no intercept
+summ.16.0 <- summary(total.fit.16.0)
+
+degree <- c(1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 13, 16)
+intercept <- c(T, F, T, F, T, F, T, F, T, F, T, F, F, F, F)
+r_sq <- c(summ.1$r.squared, summ.10$r.squared, summ.2$r.squared, summ.20$r.squared, summ.3$r.squared, summ.30$r.squared, summ.4$r.squared, summ.40$r.squared, summ.5$r.squared, summ.50$r.squared, summ.6$r.squared, summ.60$r.squared, summ.70$r.squared, summ.13.0$r.squared, summ.16.0$r.squared)
+adj.r_sq <- c(summ.1$adj.r.squared, summ.10$adj.r.squared, summ.2$adj.r.squared, summ.20$adj.r.squared, summ.3$adj.r.squared, summ.30$adj.r.squared, summ.4$adj.r.squared, summ.40$adj.r.squared, summ.5$adj.r.squared, summ.50$adj.r.squared, summ.6$adj.r.squared, summ.60$adj.r.squared, summ.70$adj.r.squared, summ.13.0$adj.r.squared, summ.16.0$adj.r.squared)
+
+summary_table <- tibble(degree, intercept, r_sq, adj.r_sq)
+summary_table
+```
+
+From this, we can see that the 16th model with no intercept gives us the best R-squared and adjusted R-squared values. The R-squared value seems to be going up with the degree, but we will stop here and choose the 16th degree model.
+
+```{r}
+# plotting the fitted trend with the log-transformed trend
+plot(total.logts, main = "Log Transformed Total Tourists + Fitted Trend", xlab = "Years", ylab = "Number of Tourists", ylim = c(10, 15))
+plot.new = T
+lines(seq(1970, (1996*12 - 1)/12, by = 1/12), total.fit.16.0$fitted.values, col = "blue")
+legend("topleft", legend = c("observed trend", "fitted trend"), col = c(1, "blue"), lty = 1)
+```
+
+The fitted curve stays within the range of the observed trend to a good extent. However, it is clear that without adding the seasonality, we will not have a good fit of the trend which can be used to make predictions.
+
+```{r}
+# plotting the de-trended series
+
+# getting the 12-month moving-average for the series
+total.ma <- stats::filter(total.logts, rep(1/12, 12), sides = 2)
+plot(total.ma, ylim = c(11.5, 13.5), main = "12-Month MA + Log Transformed Trend", xlab = "Years", ylab = "Number of Tourists", col = "red")
+plot.new = T
+lines(total.logts)
+legend("topleft", legend = c("MA trend", "log-transformed trend"), col = c("red", 1), lty = 1)
+
+# de-trending the series
+n = length(total.logts)
+total.tr <- rep(0, n - 24)
+for (i in 13:(n-12)) {
+  total.tr[i - 12] = mean(c(0.5 * total.logts[i - 12], total.logts[(i - 11): (i + 11)], 0.5 * total.logts[i + 12])) * 13/12
+}
+total.detr = total.logts[13:(n-12)] - total.tr
+total.detr <- ts(total.detr, start = 1971, freq = 12)
+
+plot(total.detr, main = "Detrended Series", xlab = "Years", ylab = "Log Number of Tourists", type = 'l')
+```
+
+The detrended series has a mean that seems to be constant, around -0.5. We can conclude that the de-trended series is stationary.
+
+Part (d)
+
+```{r}
+ss = rep(0, 12)
+ss[1] = mean(covid.detr[(0:24) * 12 + 1])
+ss[2] = mean(covid.detr[(0:24) * 12 + 2])
+ss[3] = mean(covid.detr[(0:24) * 12 + 3])
+ss[4] = mean(covid.detr[(0:24) * 12 + 4])
+ss[5] = mean(covid.detr[(0:24) * 12 + 5])
+ss[6] = mean(covid.detr[(0:24) * 12 + 6])
+ss[7] = mean(covid.detr[(0:24) * 12 + 7])
+ss[8] = mean(covid.detr[(0:24) * 12 + 8])
+ss[9] = mean(covid.detr[(0:24) * 12 + 9])
+ss[10] = mean(covid.detr[(0:24) * 12 + 10])
+ss[11] = mean(covid.detr[(0:24) * 12 + 11])
+ss[12] = mean(covid.detr[(0:24) * 12 + 12])
+
+ss = ss - mean(ss)
+ss = rep(ss, 26)
+
+total.ds <- total.logts - ss # obtaining the deseasoned series
+
+plot(total.ds, main = "Deseasoned Series", xlab = "Years", ylab = "Log Number of Tourists")
+```
+
+```{r}
+# trend-seasonal model
+snew <- ss[13:(n-12)]
+total.lm <- lm(total.logts[13:(n-12)] ~ total.tr + snew)
+summary(total.lm)$r.squared
+total.lm0 <- lm(total.logts[13:(n-12)] ~ 0 + total.tr + snew)
+summary(total.lm0)$r.squared
+```
+
+The linear trend-seasonal model with no intercept is chosen, since it gives a better r-squared value.
+
+```{r}
+plot(total.logts, main = "Observed Trend + Fitted Trend-Seasonal Model", xlab = "Years", ylab = "Log Number of Tourists", type = 'l')
+plot.new = T
+lines(seq(1971, (1995*12 - 1)/12, by = 1/12), total.lm0$fitted.values, col = "red", type = 'l')
+legend("topleft", legend = c("observed log trend", "fitted trend"), col = c(1, "red"), lty = 1)
+```
+
+```{r}
+#plotting the de-trended and de-seasoned series
+plot(total.detr - ss[13:(n-12)], main = "De-trended and Deseasoned Series", xlab = "Years", ylab = "Log Number of Tourists")
+
+unique(ss)
+sum(unique(ss))
+```
+
+The detrended and deseasoned series seems to be stationary.
+The sum of the seasonal factor coefficients sum up to 0. There are more positive coefficients than negative coefficients, by which we might be able to account for the overall increasing trend of the series.
+
+Part (e)
+
+```{r}
+# building a lm to predict the total.tr values for 1995 and 1996, since we do not have the trend data
+hawaii.trdata <- tibble(hawaii$yearmonth[13:(n-12)], total.tr)
+colnames(hawaii.trdata) <- c("yearmonth", "tr")
+
+hawaii.trlm <- lm(tr ~ yearmonth, hawaii.trdata)
+summary(hawaii.trlm)$r.squared
+hawaii.trlm0 <- lm(tr ~ 0 + I(yearmonth^0.34), hawaii.trdata)
+summary(hawaii.trlm0)$r.squared
+plot(hawaii.trlm0$fitted.values, type = 'l')
+plot.new = T
+lines(hawaii.trdata$tr, col = "red")
+```
+
+Choosing the no-intercept model
+
+```{r}
+hawaii.tr <- tibble(c(9601, 9602, 9603, 9604, 9605, 9606, 9607, 9608, 9609, 9610, 9611, 9612), rep(NULL, 12))
+colnames(hawaii.tr) <- c("yearmonth", "tr")
+
+hawaii.tr$tr <- predict(hawaii.trlm0, data.frame(yearmonth = hawaii.tr$yearmonth)) # making total.tr predictions for 1995 and 1996
+preds <- predict(total.lm0, data.frame(total.tr = hawaii.tr$tr, snew = ss[1:12]))
+preds <- ts(preds, start = 1996, frequency = 12)
+
+plot(total.logts, main = "Log Data 1992 - 1995 + Predictions for 1996", xlab = "Years", ylab = "Log Number of Tourists", xlim = c(1992, 1997), ylim = c(13, 13.5)) + abline(v = 1996, col = "red")
+plot.new = T
+lines(preds, col = "blue", lty = 2)
+legend("topleft", legend = c("original data", "predicted trend"), col = c(1, "blue"), lty = c(1, 2))
+
+# let us shift the predicted values by a small amount to see what the trend might be like if there was no error in predicting the trend due to the linear model
+# since the number of tourists goes down every year from December to January, we will choose a value that brings January 1996 below December 1995
+plot(total.logts, main = "Log Data 1992 - 1995 + Predictions for 1996 With Y-Shift to Account for Error", xlab = "Years", ylab = "Log Number of Tourists", xlim = c(1992, 1997), ylim = c(13, 13.5)) + abline(v = 1996, col = "red")
+plot.new = T
+lines(preds - 0.28, col = "blue", lty = 2) # the -0.28 is arbitrary is this graph is not indicative of anything; it is just an extra plot
+legend("topleft", legend = c("original data", "predicted trend"), col = c(1, "blue"), lty = c(1, 2))
+```
+
+There is a margin of error in the predicted trend (over-estimate), due to the limitations of the linear regression model used to predict the trend component.
+
+Part (f)
+
+Since the series has both a trend and a seasonality of 12, we would need to difference by lag of 12 for the seasonality, and then subsequently differency by a lag of 1 for the trend.
+
+```{r}
+hawaii.diff <- diff(total.logts, lag = 12)
+plot(diff(hawaii.diff, 1)) + abline(h = 0, col = "blue", lty = 2)
+```
+
+We can see that the resulting series is stationary with mean 0.
+
+Question 4
+
+Part (a)
+
+```{r}
+# loading the dataset
+lt.data <- as_tibble(read.table("lt.txt"))
+colnames(lt.data) <- c("y")
+head(lt.data, 3)
+
+yt <- lt.data$y
+```
+
+```{r}
+st.1 <- rep(0, 500) # s_t|(t-1)
+sigt.1 <- rep(0, 500) # sigma_t|(t-1)
+vt <- rep(0, 500)
+Vt <- rep(0, 500)
+st.0 <- rep(0, 500) # s_t|t
+sigt.0 <- rep(0, 500) # sigma_t|t
+
+# initializing values
+st.1[1] = 0.2 # s_1|0
+sigt.1[1] = 2.25 # sigma_1|0
+vt[1] = yt[1] - st.1[1] 
+Vt[1] = sigt.1[1] + 0.25
+# diffuse initialization
+st.0[1] = st.1[1] + ((sigt.1[1] * vt[1])/Vt[1])
+sigt.0[1] = sigt.1[1] * (1 - (sigt.1[1]/Vt[1]))
+```
+
+```{r}
+# implementing the Kalman Filter
+for (i in c(2:500)) {
+  vt[i] = yt[i] - st.1[i]
+  Vt[i] = sigt.1[i] + 0.25
+  st.0[i] <- st.1[i] + sigt.1[i] * (1/Vt[i]) * vt[i]
+  sigt.0[i] = sigt.1[i] - (sigt.1[i] * (1/Vt[i]) * sigt.1[i])
+  st.1[i+1] = st.0[i]
+  sigt.1[i+1] = sigt.0[i] + 0.01
+}
+
+# calculating the log-likelihood
+ll <- dnorm(yt[1], st.1[1], sqrt(sigt.1[1] + 0.25))
+for (i in c(2:500)) {
+  ll <- ll * dnorm(vt[i], 0, sqrt(Vt[i]))
+}
+log(ll) # printing the exact log-likelihood of the data
+```
+
+Part (b)
+
+```{r}
+plot(st.1, type = 'l', main = "s_t|(t-1)", ylab = "value", xlab = "time", ylim = c(-0.3, 3))
+# adding confidence interval bands
+# z(0.975) = 1.96
+plot.new = T
+lines(st.1 - (1.96 * sqrt(sigt.1)), col = "blue", lty = 2)
+plot.new = T
+lines(st.1 + (1.96 * sqrt(sigt.1)), col = "blue", lty = 2)
+```
+
+Part (c)
+
+```{r}
+plot(st.0, type = 'l', main = "s_t|t", ylab = "value", xlab = "time", ylim = c(-0.3, 3))
+# adding confidence interval bands
+# z(0.975) = 1.96
+plot.new = T
+lines(st.0 - (1.96 * sqrt(sigt.0)), col = "blue", lty = 2)
+plot.new = T
+lines(st.0 + (1.96 * sqrt(sigt.0)), col = "blue", lty = 2)
+```
+
+The confidence interval is narrower for s_t|t compared to s_t|(t-1).

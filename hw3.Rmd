@@ -1,0 +1,462 @@
+---
+title: "Financial Time Series Analysis HW 03"
+author: "Varshini Yanamandra"
+date: "2023-03-12"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# required libraries
+library(tidyverse)
+library(astsa)
+library(tseries)
+library(TSA)
+```
+
+Question 1
+
+```{r}
+unem <- read.table('./m-unrate.txt', header = T) # loading data from .txt file
+head(unem)
+```
+
+Part (a)
+
+```{r}
+# converting the data to time-series data
+unem.ts <- ts(unem[, 4], start = 1948, frequency = 12)
+plot(unem.ts)
+```
+
+Since we see that the column 4 in the dataset is 'rate,' we can infer that the first difference is already taken (rate (at time = 2) = (x2 - x1)).
+
+```{r}
+# WHAT I MISSED: TAKING THE DIFFERENCE
+unem.ts = diff(unem.ts)
+# fitting an AR(12) model to the data
+ar12 <- arima(unem.ts, c(12, 0, 0))
+ar12
+```
+
+Estimated parameters (ar1 to ar12, in order): 0.9943, 0.2319, -0.0750, -0.0606, 0.0286, -0.1336, -0.0415, 0.0506, -0.0174, -0.1185, 0.168, -0.0434
+Estimated intercept: 5.6578
+Standard errors (ar1 to ar12, in order): 0.0370, 0.0518, 0.0524, 0.0525, 0.0526, 0.0526, 0.0526, 0.0527, 0.0526, 0.0525, 0.052, 0.0374
+Standard error of the intercept: 0.4245
+sigma^2_a: 0.0386
+
+Part (b)
+
+```{r}
+Box.test(unem.ts, lag = round(log(length(unem.ts))), type = "Ljung")
+```
+
+The p-value is much lesser than 0.01, meaning that we can reject the null hypothesis that the residuals look like a white noise at 99% confidence levels. Since p-value < 2.2e-16, we can also reject it at 99.99% confidence level.
+
+Part (c)
+
+```{r}
+source("arima.predict.R")
+
+# predictions for April, May, June and July of 2009
+ar12.preds <- I0.predict(unem.ts, ar = c(0.9943, 0.2319, -0.0750, -0.0606, 0.0286, 
+                                         -0.1336, -0.0415, 0.0506, -0.0174, -0.1185, 
+                                         0.168, -0.0434), mu = 5.6578, 
+                         origin = length(unem.ts), sigma2 = 0.0386, h = 4)
+ar12.preds[1, ]
+
+# 95% confidence intervals
+ar12.preds.upper <- ar12.preds[1, ] + 1.96*ar12.preds[2, ]
+ar12.preds.lower <- ar12.preds[1, ] - 1.96*ar12.preds[2, ]
+
+# displaying the forecasted values with the upper and lower 95% confidence intervals
+rbind(ar12.preds[1, ], ar12.preds.upper, ar12.preds.lower)
+```
+
+```{r}
+# extra - plotting the forecasted values with the data
+plot(1:length(unem.ts), unem.ts, ylab = "Value", xlab = "Time",
+     type = "l", xlim = c(700, 740)) # zooming in for better visibility
+lines(length(unem.ts) + 0:4, c(unem.ts[length(unem.ts)],
+                               ar12.preds[1, ]), col = "red")
+points(length(unem.ts) + 1:4, ar12.preds[1, ], col = "grey", pch = 1)
+lines(length(unem.ts) + 1:4, ar12.preds.lower, lty = 2, col = "blue")
+lines(length(unem.ts) + 1:4, ar12.preds.upper, lty = 2, col = "blue")
+abline(v = length(unem.ts), lty = 3, col = "grey")
+abline(v = length(unem.ts) + 4, lty = 3, col = "grey")
+title("Forecasts for April, May, June and July 2009")
+```
+
+Part (d)
+
+```{r}
+# filtering the dataset to only include data until December 2007
+unem.new <- unem %>% filter(Year < 2008)
+head(unem.new)
+
+# converting the data to time-series data
+unem.ts2 <- ts(unem.new[, 4], start = 1948, frequency = 12)
+plot(unem.ts2)
+
+# fitting an AR(12) model to the data
+ar12.new <- arima(unem.ts2, c(12, 0, 0))
+ar12.new
+
+# forecasting the unemployment rate changes for the next 15 months (January 2008 - March 2009)
+source("arima.predict.R")
+unem.preds <- I0.predict(unem.ts2, ar = c(0.9837, 0.2278, -0.0700, -0.0546,
+                                          0.0269, -0.1268, -0.0484, 0.0568,
+                                          -0.0205, -0.1158, 0.1621, -0.0381), 
+                         mu = 5.4846, origin = length(unem.ts2), sigma2 = 0.03839, h = 15)
+
+# 95% confidence intervals
+unem.preds.upper <- unem.preds[1, ] + 1.96*unem.preds[2, ]
+unem.preds.lower <- unem.preds[1, ] - 1.96*unem.preds[2, ]
+
+# displaying the forecasted values
+rbind(unem.preds[1, ], unem.preds.lower, unem.preds.upper)
+```
+
+Part (e)
+
+```{r}
+n = length(unem.ts) - length(unem.ts2)
+
+plot(1:length(unem.ts2), unem.ts2, ylab = "Value", xlab = "Time", type = "l", xaxt = "n")
+lines(length(unem.ts2) + 0:15, c(unem.ts2[length(unem.ts2)],
+                                 unem.preds[1, ]), col = "red") # forecasted values
+lines(length(unem.ts2) + 1:15, unem.preds.lower, lty = 2, col = "blue")
+lines(length(unem.ts2) + 1:15, unem.preds.upper, lty = 2, col = "blue")
+abline(v = length(unem.ts2), lty = 3, col = "grey")
+abline(v = length(unem.ts2) + 15, lty = 3, col = "grey")
+lines(length(unem.ts2) + 0:n, unem.ts[length(unem.ts2):length(unem.ts)]) # actual values
+# defining the axis labels to get dates instead of indices
+axis(1, 1:length(unem.ts), seq(as.Date("1948/1/1"), as.Date("2009/3/1"), 
+                               by = "month"), las = 1, cex.axis = 0.7)
+title("Forecasts from January 2008 - March 2009 with the actual data")
+```
+
+```{r}
+# zooming into the plot
+plot(1:length(unem.ts2), unem.ts2, ylab = "Value", xlab = "Time", 
+     type = "l", xlim = c(700, 735), xaxt = "n")
+lines(length(unem.ts2) + 0:15, c(unem.ts2[length(unem.ts2)], 
+                                 unem.preds[1, ]), col = "red") # forecasted values
+points(length(unem.ts2) + 1:15, unem.preds[1, ], col = "grey", pch = 1)
+lines(length(unem.ts2) + 1:15, unem.preds.lower, lty = 2, col = "blue")
+lines(length(unem.ts2) + 1:15, unem.preds.upper, lty = 2, col = "blue")
+abline(v = length(unem.ts2), lty = 3, col = "grey")
+abline(v = length(unem.ts2) + 15, lty = 3, col = "grey")
+lines(length(unem.ts2) + 0:n, unem.ts[length(unem.ts2):length(unem.ts)]) # actual values
+# defining the axis labels to get dates instead of indices
+axis(1, 1:length(unem.ts), seq(as.Date("1948/1/1"), as.Date("2009/3/1"), 
+                               by = "month"), las = 2, cex.axis = 0.5)
+title("Forecasts from January 2008 - March 2009 with the actual data - Zoomed")
+```
+
+
+Question 2
+
+```{r}
+# setting up the data
+mort <- read.table('mortgage.dat', header = F) # reading data from the .dat file
+colnames(mort) <- c("year", "month", "day", "rate") # adding column names
+head(mort)
+
+# converting the data to a time-series object
+mort.ts <- ts(mort[, 4], start = c(1976, 6), frequency = 12)
+```
+
+Part (a)
+
+```{r}
+plot(mort.ts, xlab = "Time", ylab = "Value")
+title("30-Year Mortgage Rate in the US from 1976 - 2007")
+```
+
+We can see from the plot that the time series does not have a constant mean with time. The mean of the time series shows a varying trend (increasing until around 1982 and then decreasing). Hence, it needs to be transformed to achieve stationarity.
+
+Part (b)
+
+```{r}
+# taking the natural log transformation
+mort.logts <- ts(log(mort[, 4]), start = c(1976, 6), frequency = 12)
+plot(mort.logts, xlab = "Time", ylab = "Value")
+title("Log-Transformed 30-Year Mortgage Rate in the US from 1976 - 2007")
+```
+
+The trend of the mean remains the same. However, we see a slight stabilization in the variance of the time series. Hence, the time series is still not stationary.
+
+Part (c)
+
+```{r}
+# taking the difference of log(x_t)
+y <- diff(log(mort[, 4]), lag = 1)
+y.ts <- ts(y, start = c(1976, 6), frequency = 12)
+plot(y.ts, xlab = "Time", ylab = "Value")
+abline(h = 0)
+```
+
+The mean is constant (around 0), and the variance also remains stabilized. This time series is stationary, especially for the duration after 1985.
+
+Part (d)
+
+```{r}
+# ACF
+acf(y, main = "", lag = 30)
+title("Sample ACFs")
+```
+
+We see that the ACFs become very close to 0 after lag 3. So we conclude that the MA part of the model could have order q = 3 with a high probability. We see a sinusoidal pattern in the ACFs, giving us the insight that there is an AR component, as well.
+
+```{r}
+# PACF
+acf(y, type = "partial", ylab = "PACF", main = "")
+title("Sample PACFs")
+```
+
+The PACF of the data cuts off after lag 2, implying that the order of the AR part is p = 2 with a high probability.
+
+```{r}
+# EACF
+eacf(y, ar.max = 12, ma.max = 12)
+```
+
+With EACF, we need to check for the upper-left corner of the triangle of 'O's. Based on the EACF obtained, we might suggest using an ARMA(2, 2) model (ignoring the 'X' at (AR-8, MA-8)) or an ARMA(2, 3) model. We can try an MA(2) model if we ignore the 'X' at (AR-1, MA-3). 
+
+The ARMA(2, 3) model seems to be the best choice for the model, based on the combined results of the ACF, PACF and EACF.
+
+Part (e)
+
+Models selected for analysis:
+1. ARMA(2, 3) - top candidate
+2. ARMA(2, 2)
+3. MA(2)
+
+1. ARMA(2, 3) model
+
+```{r}
+# part (i)
+arma23 <- arima(y, order = c(2, 0, 3))
+arma23
+```
+
+The estimated coefficients are (in order):
+AR: -0.0313, -0.4103
+MA: 0.5609, 0.3737, 0.0758
+Intercept: -0.0010
+
+The standard errors are (in order):
+AR: 0.3168, 0.2840
+MA: 0.3252, 0.3871, 0.1734
+Intercept: 0.0019
+
+```{r}
+# part (ii)
+arma23.res <- arma23$residuals
+plot(arma23.res, xlab = "Time", ylab = "Residuals")
+title("Residual Plot for ARMA(2, 3)")
+```
+
+The mean is constant (at around 0), and the variance is stable. We can see that the residuals are stationary. The residuals do not show any seasonality, either.
+
+```{r}
+# part (iii)
+
+# ACF
+acf(arma23.res, main = "", lag = 50)
+title("ACF of Residuals for ARMA(2, 3)")
+
+# PACF
+acf(arma23.res, lag = 50, type = "partial", main = "")
+title("PACF of Residuals for ARMA(2, 3)")
+
+# EACF
+eacf(arma23.res, ar.max = 12, ma.max = 12)
+```
+
+We see no pattern in both the ACF and PACF plots - they don't vanish after certain lags, nor do they change signs after a set number of lags. The EACF is not very clean, either.
+
+```{r}
+# part (iv)
+Box.test(arma23.res, lag = 12, type = "Ljung")
+```
+
+The p-value obtained from the p-value is 0.7097, which is much greater than 0.05. There is not enough evidence to reject the null hypothesis that the residuals are white noise, so we fail to reject the null hypothesis. We accept that the residual series looks like white noise.
+
+Part (v) - The AIC of the model is -1630.52 (from part (i)).
+
+```{r}
+# part (vi)
+
+arma23.err <- rep(0, 30)
+n = length(y)
+
+for (i in 1:30) {
+  mod = arima(y[1:(n-31+i)], order = c(2, 0, 3))
+  pred = predict(mod, 1)
+  arma23.err[i] <- (pred$pred - y[n-30+i])^2
+}
+
+mean(arma23.err)
+```
+
+2. ARMA(2, 2) model
+
+```{r}
+# part (i)
+arma22 <- arima(y, order = c(2, 0, 2))
+arma22
+```
+
+The estimated coefficients are (in order):
+AR: 0.0155, -0.2862
+MA: 0.5118, 0.2200
+Intercept: -0.0010
+
+The standard errors are (in order):
+AR: 0.2798, 0.0942
+MA: 0.2817, 0.1729
+Intercept: 0.0019
+
+```{r}
+# part (ii)
+arma22.res <- arma22$residuals
+plot(arma22.res, xlab = "Time", ylab = "Residuals")
+title("Residual Plot for ARMA(2, 2)")
+```
+
+Even here, the residual series looks to be stationary. The mean remains constant around 0 and the variance is mostly stable and there is no seasonality shown by the residuals.
+
+```{r}
+# part (iii)
+
+# ACF
+acf(arma22.res, main = "", lag = 50)
+title("ACF of Residuals for ARMA(2, 3)")
+
+# PACF
+acf(arma22.res, lag = 50, type = "partial", main = "")
+title("PACF of Residuals for ARMA(2, 3)")
+
+# EACF
+eacf(arma22.res, ar.max = 12, ma.max = 12)
+```
+
+We see no pattern in both the ACF and PACF plots - they don't vanish after certain lags, nor do they change signs after a set number of lags. The EACF is not very clean, either. This is a very similar result as obtained for the ARMA(2, 3) model.
+
+```{r}
+# part (iv)
+Box.test(arma22.res, lag = 12, type = "Ljung")
+```
+
+The p-value obtained from the p-value is 0.7114, which is much greater than 0.05. There is not enough evidence to reject the null hypothesis that the residuals are white noise, so we fail to reject the null hypothesis. We accept that the residual series looks like white noise. The p-value is greater than what was obtained for the residuals of the ARMA(2, 3) model (0.7097).
+
+Part (v) - The AIC of the model is -1632.34 (from part (i)). This is lesser than the AIC obtained for the ARMA(2, 3) model, which is -1630.52.
+
+```{r}
+# part (vi)
+
+arma22.err <- rep(0, 30)
+n = length(y)
+
+for (i in 1:30) {
+  mod = arima(y[1:(n-31+i)], order = c(2, 0, 2))
+  pred = predict(mod, 1)
+  arma22.err[i] <- (pred$pred - y[n-30+i])^2
+}
+
+mean(arma22.err)
+```
+
+The MSE obtained is slightly greater than the error obtained for the ARMA(2, 3) model (0.0005019999).
+
+From this, we can conclude that both ARMA(2, 2) and ARMA(2, 3) models are a good fit for the data. However, ARMA(2, 2) seems to be a slightly better fit since its AIC is lower and the MSE is only slightly higher.
+
+3. MA(2) model
+
+```{r}
+# part (i)
+ma2 <- arima(y, order = c(0, 0, 2))
+ma2
+```
+
+The estimated coefficients are (in order):
+MA: 0.5293, 0.0065
+Intercept: -0.0010
+
+The standard errors are (in order):
+MA: 0.0579, 0.0608
+Intercept: 0.0021
+
+```{r}
+# part (ii)
+ma2.res <- ma2$residuals
+plot(ma2.res, xlab = "Time", ylab = "Residuals")
+title("Residual Plot for MA(2)")
+```
+
+Similar to what was seen for the other two models, the residual series seems to be stationary, with no seasonal trends displayed.
+
+```{r}
+# part (iii)
+
+# ACF
+acf(ma2.res, main = "", lag = 50)
+title("ACF of Residuals for MA(2)")
+
+# PACF
+acf(ma2.res, lag = 50, type = "partial", main = "")
+title("PACF of Residuals for MA(2)")
+
+# EACF
+eacf(ma2.res, ar.max = 12, ma.max = 12)
+```
+
+The ACF and PACF plots don't show any patters, similar to the first two models. However, the EACF output is relatively clean, with a possible model for the residuals being ARMA(2, 2). 
+If we ignore the two wayward 'X's in the upper right triangle, we could also say, then, that there is no model followed (ARMA(0, 0)).
+
+```{r}
+# part (iv)
+Box.test(ma2.res, lag = 12, type = "Ljung")
+```
+
+The p-value is 0.1512, which is much lesser than that obtained for the previous two models. At 80% confidence level, we can reject the null hypothesis that the residuals are a white noise. However, we fail to reject the null hypothesis at 85%, 90% and 95% confidence levels.
+
+Part (v) - The AIC of the model is -1628.28 (from part (i)). This is greater than the AIC of both of the previous models.
+
+```{r}
+# part (vi)
+
+ma2.err <- rep(0, 30)
+n = length(y)
+
+for (i in 1:30) {
+  mod = arima(y[1:(n-31+i)], order = c(0, 0, 2))
+  pred = predict(mod, 1)
+  ma2.err[i] <- (pred$pred - y[n-30+i])^2
+}
+
+mean(ma2.err)
+```
+
+The MSE is greater than the MSE of the both of the previous models.
+
+Part (f)
+
+From the analysis done in Part (e), the best model according to me is the ARMA(2, 2) model. This is not what I initially interpreted - I thought that the ARMA(2, 3) model would be the best fit. However, since the AIC of the ARMA(2, 2) model is lower and the p-value of the Ljung-Box test is higher, I have decided to go with it, despite a very slightly higher MSE. 
+Both ARMA(2, 2) and ARMA(2, 3) seem to be decent fits, with close values of the performance metrics. However, the MA(2) model is not a good fit. Especially because the ACF and PACF plots of the time series data shows the presence of both AR and MA components. The MSE is higher than for the other models. A big concern is that the white-noise hypothesis can be rejected for the residuals at 80% confidence, which is significant. Another one is that the EACF is relatively clean, which is not expected for white-noise.
+Final choice: ARMA(2, 2)
+
+Part (g)
+
+The housing market is a vital factor of a country's economy. In this question, we have studied the 30-year mortgage-rates in the US from June 1976 to March 2007. This is an important study because getting an idea of how the mortgage rates fluctuate with time and finding any patterns can help us predict the future rates, as well as look out for warning signs for extreme fluctuations.
+
+The data was first plotted to get a visual representation and to get an idea of the trend of the mortgage rates through the years. It was found that the time series was not a stationary series, so a log transformation was applied and then, a first-order differencing was applied to the data, after which it became a stationary series. This stationary series was used for further analysis.
+
+Multiple time-series models were fit to the data, like ARMA(2, 2), ARMA(2, 3) and MA(2) models. The performance metrics associated with each of these models (standard errors of the coefficient estimates, AIC, ACF, PACF, EACF, Ljung-Box test p-value, residual analysis, MSE of one-step-ahead predictions) were evaluated to decide on a final, best-fit model for the data we have. The best model was chosen to be ARMA(2, 2). However, ARMA(2, 3) has also shown to be a good fit, after ARMA(2, 2). The MA(2) model was an inadequate fit.
