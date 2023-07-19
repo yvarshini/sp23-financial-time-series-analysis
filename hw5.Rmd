@@ -1,0 +1,493 @@
+---
+title: "FTSA HW 5"
+author: "Varshini Yanamandra"
+date: "2023-04-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# libraries
+library(tidyverse)
+library(FinTS)
+library(fUnitRoots)
+library(TSA)
+library(fGarch)
+library(fBasics)
+library(evir)
+library(rugarch)
+```
+
+QUESTION 1
+
+```{r}
+# reading the data
+ge <- read.table('d-geohlc.txt', header = F)
+head(ge)
+
+names(ge) <- c("year", "month", "day", "opening", "high", "low", "closing", "V8", "V9")
+ge$Date <- as.Date(with(ge, paste(year, month, day, sep="-")),"%Y-%m-%d") 
+head(ge)
+```
+
+Part (a)
+
+```{r}
+closing <- ts(ge$closing, start = c(1996, 1), frequency = 252) # 252 trading days in an year
+plot(closing)
+```
+
+```{r}
+temp = filter(ge, Date <= '1997-05-09')
+adj_closing1 <- temp$closing / 6
+
+temp = filter(ge, Date > '1997-05-09', Date <= '2000-05-05')
+adj_closing2 <- temp$closing / 3
+
+ge$adj_closing <- ge$closing
+ge$adj_closing[1:length(c(adj_closing1, adj_closing2))] <- c(adj_closing1, adj_closing2)
+
+# plotting the adjusted closing prices
+adj_closing <- ts(ge$adj_closing, start = c(1996, 1), frequency = 252)
+plot(adj_closing)
+```
+
+The plot now looks continuous. This series (adjusted closing price) is not stationary, since we see that the mean is not constant, and neither is the variance.
+
+Part (b)
+
+```{r}
+high.ts <- ge$high[1:50]
+low.ts <- ge$low[1:50]
+open.ts <- ge$opening[1:50]
+close.ts <- ge$closing[1:50]
+
+# plot 1
+plot(1:50, high.ts, type = 'l', lty = 1, col = 1, ylim = c(68, 81), xlab = "Time", ylab = "Value")
+lines(low.ts, lty = 1, col = "blue")
+lines(open.ts, lty = 2, col = "orange")
+lines(close.ts, lty = 2, col = "red")
+legend(x = "topleft", legend = c("high", "low", "opening", "closing"), lty = c(1, 1, 2, 2), col = c(1, "blue", "orange", "red"))
+
+# plot 2
+plot(1:50, high.ts, type = 'l', lty = 1, col = 1, ylim = c(10, 81), xlab = "Time", ylab = "Value")
+lines(low.ts, lty = 1, col = "blue")
+lines(open.ts, lty = 2, col = "orange")
+lines(close.ts, lty = 2, col = "red")
+lines(adj_closing[1:50], lty = 2, col = "green")
+legend(x = "center", legend = c("high", "low", "opening", "closing", "adjusted closing"), lty = c(1, 1, 2, 2, 2), col = c(1, "blue", "orange", "red", "green"))
+```
+
+We can see that all four series follow the same general trend. However, the mean is clearly not constant over time, suggesting that none of these series are stationary. We can also see from the second plot that the adjusted closing prices are much lower than the other values. This is because they have been divided by 6. This series follows the same trend as the closing price.
+
+Part (c)
+
+```{r}
+log_returns = ts(diff(log(ge$adj_closing)), start = c(1996, 1), frequency = 252)
+plot(log_returns)
+```
+
+Compared to the plot in part (a), we see stability in the variance, as well as a constant-looking mean. We can say that the log returns series looks to be stationary.
+
+Part (d)
+
+```{r}
+# acf
+TSA::acf(as.vector(log_returns), main = "ACF of log-returns")
+# pacf
+pacf(as.vector(log_returns), main = "")
+title("PACF of log-returns")
+```
+
+The ACF cuts off after lag 2 (most lags after that are either within the significance boundary or around it). The PACF cuts off after lag 5, since most lags after that within or around the significance boundary. Since these plots are a bit ambiguous, let us look at the EACF.
+
+Part (e)
+
+```{r}
+# eacf
+eacf(as.vector(log_returns))
+```
+
+From the EACF plot, it looks like we could try fitting MA(2), MA(5) and ARMA(2, 2) models.
+
+```{r}
+# model 1: MA(2)
+m1 <- arima(log_returns, order = c(0, 0, 2))
+
+aic <- m1$aic
+names(aic) = "MA(2)"
+
+# model diagnostics
+res1 = m1$residuals[3:length(log_returns)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res1, type = 'l', main = "Residuals of MA(2) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m1$residuals, lag = 12, type = "Ljung", fitdf = sum(m1$mask)) # p-value < 0.05: residuals do not look like a white noise
+p
+# saving the p-value
+LBpval <- p$p.value
+names(LBpval) = "MA(2)"
+## 3. ACF of the residuals
+TSA::acf(res1, main = "") # most ACFs are close to the significance boundary (lag 27) or within it, after lag 5
+title("ACF Plot of Residuals of MA(2) Model")
+## 4. PACF of the residuals
+pacf(res1, main = "") # most PACFs are close to the significance boundary (lag 27) or within it, after lag 5
+title("PACF Plot of Residuals of MA(2) Model")
+## 5. EACF of the residuals
+eacf(res1) # mostly clean
+## 6. Checking for unit roots
+abs(polyroot(c(1, m1$coef[1:2]))) # the roots look good
+```
+
+The diagnostics are not looking very good. Let us move on to the next model.
+
+```{r}
+# model 2: MA(5) model
+m2 = arima(log_returns, order = c(0, 0, 5))
+
+aic <- c(aic, m2$aic)
+names(aic)[2] <- "MA(5)"
+
+# model diagnostics
+res2 = m2$residuals[6:length(log_returns)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res2, type = 'l', main = "Residuals of MA(5) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m2$residuals, lag = 12, type = "Ljung", fitdf = sum(m2$mask)) # p-value < 0.05: residuals do not look like a white noise
+p
+# saving the p-value
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "MA(5)"
+## 3. ACF of the residuals
+TSA::acf(res2, main = "") # most ACFs are close to the significance boundary or within it
+title("ACF Plot of Residuals of MA(5) Model")
+## 4. PACF of the residuals
+pacf(res2, main = "") # most PACFs are close to the significance boundary or within it
+title("PACF Plot of Residuals of MA(5) Model")
+## 5. EACF of the residuals
+eacf(res2) # clean
+## 6. Checking for unit roots
+abs(polyroot(c(1, m2$coef[1:5]))) # there are two pairs of repeated roots, which is not good. This could be a sign of redundancy.
+```
+
+```{r}
+# model 3: ARMA(2, 2) model
+m3 = arima(log_returns, order = c(2, 0, 2))
+
+aic <- c(aic, m3$aic)
+names(aic)[3] <- "ARMA(2, 2)"
+
+# model diagnostics
+res3 = m3$residuals[3:length(log_returns)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res3, type = 'l', main = "Residuals of ARMA(2, 2) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m3$residuals, lag = 12, type = "Ljung", fitdf = sum(m3$mask)) # p-value < 0.05: residuals do not look like a white noise
+p
+# saving the p-value
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARMA(2, 2)"
+## 3. ACF of the residuals
+TSA::acf(res3, main = "") # most ACFs are close to the significance boundary or within it, except lag 27
+title("ACF Plot of Residuals of ARMA(2, 2) Model")
+## 4. PACF of the residuals
+pacf(res3, main = "") # most PACFs are close to the significance boundary or within it, except lag 27
+title("PACF Plot of Residuals of ARMA(2, 2) Model")
+## 5. EACF of the residuals
+eacf(res3) # clean
+## 6. Checking for unit roots
+abs(polyroot(c(1, m3$coef[1:2]))) # AR part - repeated roots, suggest redundancy
+abs(polyroot(c(1, m3$coef[3:4]))) # MA part - roots look fine
+# the roots look fine now
+```
+
+Let us try ARMA(1, 2) model.
+
+```{r}
+# model 4: ARMA(1, 2) model
+m4 = arima(log_returns, order = c(1, 0, 2))
+
+aic <- c(aic, m4$aic)
+names(aic)[4] <- "ARMA(1, 2)"
+
+# model diagnostics
+res4 = m4$residuals[3:length(log_returns)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res4, type = 'l', main = "Residuals of ARMA(1, 2) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m4$residuals, lag = 12, type = "Ljung", fitdf = sum(m4$mask)) # p-value < 0.05: residuals do not look like a white noise
+p
+# saving the p-value
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARMA(1, 2)"
+## 3. ACF of the residuals
+TSA::acf(res4, main = "") # most ACFs are close to the significance boundary or within it, except lag 27
+title("ACF Plot of Residuals of ARMA(1, 2) Model")
+## 4. PACF of the residuals
+pacf(res4, main = "") # most PACFs are close to the significance boundary or within it, except lag 27
+title("PACF Plot of Residuals of ARMA(1, 2) Model")
+## 5. EACF of the residuals
+eacf(res4) # clean
+## 6. Checking for unit roots
+abs(polyroot(c(1, m3$coef[1]))) # AR part - looks fine
+abs(polyroot(c(1, m3$coef[2:3]))) # MA part - roots look fine
+# the roots look fine now
+```
+
+```{r}
+# comparing aic and p-values
+rbind(aic, LBpval)
+```
+
+The ARMA(1, 2) model has the lowest aic value, while the MA(5) model has the best p-value for the Ljung-Box test for the residuals. Since the MA(5) model has repeated roots, let us proceed with the ARMA(1, 2) model.
+
+Part (f)
+
+```{r}
+# acf
+TSA::acf(res2, main = "") # most ACFs are close to the significance boundary or within it
+title("ACF Plot of Residuals of MA(5) Model")
+# pacf
+pacf(res2, main = "") # most PACFs are close to the significance boundary or within it
+```
+
+Both the ACF and PACF plots have one significant reading at lag 27.
+
+Part (g)
+
+```{r}
+# acf of squared residuals
+TSA::acf(res2^2, main = "")
+title("ACF Plot of Residuals of MA(5) Model")
+# pacf of squared residuals
+pacf(res2^2, main = "")
+```
+
+All ACFs are significant in the plot above. Most PACFs are significant, as well. This suggests the presence of ARCH effects.
+
+```{r}
+# testing for ARCH effects
+Box.test(res2^2, type="Ljung", lag=12)
+FinTS::ArchTest(res2, lag = 12)
+```
+
+Both the tests suggest the presence of ARCH effects, since the p-value is extremely low.
+
+Part (h)
+
+```{r}
+# garch model 1: ARMA(1, 2)-GARCH(1, 1) model - normal distribution
+gm1 <- garchFit(~arma(1, 2) + garch(1, 1), data = log_returns, include.mean = T, cond.dist = "norm", trace = F)
+summary(gm1)
+```
+
+As there is a significant lag in the ACF of the squared residuals at lag 8, let us try GARCH(8, 0).
+
+```{r}
+# garch model 2: ARMA(1, 2)-GARCH(8, 0) model - normal distribution
+gm2 <- garchFit(~arma(1, 2) + garch(8, 0), data = log_returns, include.mean = T, cond.dist = "norm", trace = F)
+summary(gm2)
+```
+
+Since the ma2 coefficient is not significant at the 95% level, let us try an ARMA(1, 1)-GARCH(8, 0) model.
+
+```{r}
+# garch model 3: ARMA(1, 1)-GARCH(8, 0) model - skewed normal distribution
+gm3 <- garchFit(~arma(1, 1) + garch(8, 0), data = log_returns, include.mean = T, cond.dist = "snorm", trace = F)
+summary(gm3)
+```
+
+All the estimated coefficients are significant, and the p-values of all the tests look good. We can use this model. We can see that the skewness is significant, as well.
+
+Part (i)
+
+```{r}
+# standardized residuals
+sresi = gm3@residuals/gm3@sigma.t
+plot(sresi, type = "l") # looks good
+```
+
+```{r}
+TSA::acf(sresi^2, main = "ACF of sresi^2")
+pacf(sresi^2, main = "")
+title("PACF of sresi^2")
+```
+
+```{r}
+# Q-Q plot
+qqnorm(sresi)
+qqline(sresi)
+```
+
+The Q-Q plot shows the presence of positive or right skew since there is a U-shaped curve to the Q-Q plot.
+
+```{r}
+# density plot
+densityPlot(as.timeSeries(sresi))
+```
+
+The density plot shows the right skewness, as well, since the mode is to the left of 0. There is also a very slight heavy-tailness that can be observed.
+
+Part (j)
+
+```{r}
+par(mfcol=c(2,1))
+plot(log_returns, type = 'l') # returns
+plot(gm3@sigma.t, type = "l") # estimated volatility series
+```
+
+The volatility is generally low, but there is a period from 2000 to 2003 where the volatility is a little high.
+
+
+QUESTION 2
+
+Part (a)
+
+```{r}
+spec = ugarchspec(
+  variance.model = list(model="iGARCH", garchOrder=c(1, 1)),
+  mean.model = list(armaOrder=c(0, 0)),
+  fixed.pars=list(omega=0)
+)
+
+m8 = ugarchfit(data = log_returns, spec = spec)
+ss = ugarchforecast(m8, n.ahead = 4)
+ss
+mm = fitted(ss)[1]
+ss = sigma(ss)[1]
+# 95% confidence level
+VaR5r = mm + ss*qnorm(.05)
+VaR5r4d = mm*4 + ss*qnorm(.05)*sqrt(4)
+# 99% confidence level
+VaR1r = mm + ss*qnorm(.01)
+VaR1r4d = mm*4 + ss*qnorm(.01)*sqrt(4)
+print(c(VaR5r, VaR5r4d, VaR1r, VaR1r4d))
+```
+
+Part (b)
+
+```{r}
+# using model gm3 from question 1
+pp = predict(gm3)
+pp
+```
+
+```{r}
+VaR5n = pp[1, 1] + qnorm(0.05) * pp[1, 3]
+VaR5n
+
+VaR1n = pp[1, 1] + qnorm(0.01) * pp[1, 3]
+VaR1n
+# not calculating 4-day VaR since there is an ARMA component in the model
+```
+
+Part (c)
+
+```{r}
+M = 10000
+nn = length(log_returns)
+rt = log_returns[nn]
+st = gm3@h.t[nn] 
+r1 = 1:M 
+r2 = r1
+r3 = r1
+r4 = r1
+theta = gm3@fit$coef 
+print(theta)
+```
+
+```{r}
+for (ii in 1:M) {
+  # standardized normal variates
+  nn1 = rnorm(1, 0, 1)
+  nn2 = rnorm(1, 0, 1)
+  nn3 = rnorm(1, 0, 1)
+  nn4 = rnorm(1, 0, 1)
+  
+  st1 = theta[4] + theta[5] * (rt - theta[1])^2 + theta[6] * (rt - theta[1])^2 + theta[7] * (rt - theta[1])^2 + theta[8] * (rt - theta[1])^2 + theta[9] * (rt - theta[1])^2 + theta[10] * (rt - theta[1])^2 + theta[11] * (rt - theta[1])^2 + theta[12] * (rt - theta[1])^2
+  r1[ii] = theta[1] + nn1 * sqrt(st1)
+  
+  st2 = theta[4] + theta[5] * (r1[ii] - theta[1])^2 + theta[6] * (r1[ii] - theta[1])^2 + theta[7] * (r1[ii] - theta[1])^2 + theta[8] * (r1[ii] - theta[1])^2 + theta[9] * (r1[ii] - theta[1])^2 + theta[10] * (r1[ii] - theta[1])^2 + theta[11] * (r1[ii] - theta[1])^2 + theta[12] * (r1[ii] - theta[1])^2
+  r2[ii] = theta[1] + nn2 * sqrt(st2)
+  
+  st3 = theta[4] + theta[5] * (r2[ii] - theta[1])^2 + theta[6] * (r2[ii] - theta[1])^2 + theta[7] * (r2[ii] - theta[1])^2 + theta[8] * (r2[ii] - theta[1])^2 + theta[9] * (r2[ii] - theta[1])^2 + theta[10] * (r2[ii] - theta[1])^2 + theta[11] * (r2[ii] - theta[1])^2 + theta[12] * (r2[ii] - theta[1])^2
+  r3[ii] = theta[1] + nn3 * sqrt(st3)
+  
+  st4 = theta[4] + theta[5] * (r3[ii] - theta[1])^2 + theta[6] * (r3[ii] - theta[1])^2 + theta[7] * (r3[ii] - theta[1])^2 + theta[8] * (r3[ii] - theta[1])^2 + theta[9] * (r3[ii] - theta[1])^2 + theta[10] * (r3[ii] - theta[1])^2 + theta[11] * (r3[ii] - theta[1])^2 + theta[12] * (r3[ii] - theta[1])^2
+  r4[ii] = theta[1] + nn4 * sqrt(st4)
+  
+}
+
+VaR5nS = quantile(r1, 0.05)
+VaR5nS4d = quantile(r1 + r2 + r3 + r4, 0.05)
+VaR1nS = quantile(r1, 0.01)
+VaR1nS4d = quantile(r1 + r2 + r3 + r4, 0.01)
+print(c(VaR5nS, VaR5nS4d, VaR1nS, VaR1nS4d))
+```
+
+Part (d)
+
+```{r}
+VaR5Q = quantile(log_returns, 0.05)
+VaR1Q = quantile(log_returns, 0.01)
+kk = 1:(length(log_returns) - 3)
+log_returns_4d = log_returns[kk] + log_returns[kk + 1] + log_returns[kk + 2] + log_returns[kk + 3]
+VaR5Q4d = quantile(log_returns_4d, 0.05)
+VaR1Q4d = quantile(log_returns_4d, 0.01)
+print(c(VaR5Q, VaR1Q, VaR5Q4d, VaR1Q4d))
+```
+
+Part (e)
+
+```{r}
+fit = gev(-log_returns, block = 21)
+names(fit)
+rbind(fit$par.ests, fit$par.ses)
+print(c(fit$n.all, fit$n))
+
+ymin = -fit$data
+hist(ymin)
+
+par = fit$par.est * c(-1, 1, -1)
+VaR5E.21 = par[3] - par[2]/par[1] * (1 - (-21 * log(1 - 0.05))^par[1])
+VaR1E.21 = par[3] - par[2]/par[1] * (1 - (-21 * log(1 - 0.01))^par[1])
+VaR5E4d.21 = 4^(-par[1]) * VaR5E.21
+VaR1E4d.21 = 4^(-par[1]) * VaR1E.21
+print(c(VaR5E.21, VaR1E.21, VaR5E4d.21, VaR1E4d.21))
+```
+
+Part (f)
+
+```{r}
+fit = gev(-log_returns, block = 63)
+names(fit)
+rbind(fit$par.ests, fit$par.ses)
+print(c(fit$n.all, fit$n))
+
+ymin = -fit$data
+hist(ymin)
+
+par = fit$par.est * c(-1, 1, -1)
+VaR5E.63 = par[3] - par[2]/par[1] * (1 - (-21 * log(1 - 0.05))^par[1])
+VaR1E.63 = par[3] - par[2]/par[1] * (1 - (-21 * log(1 - 0.01))^par[1])
+VaR5E4d.63 = 4^(-par[1]) * VaR5E.63
+VaR1E4d.63 = 4^(-par[1]) * VaR1E.63
+print(c(VaR5E.63, VaR1E.63, VaR5E4d.63, VaR1E4d.63))
+```
+
+Part (g)
+
+```{r}
+VaR.summary <- tibble(method = c("Risk Metrics", "Econometrics Model", "Simulated Econometrics Model", "Empirical Quantiles", "GEV (21 day sub-period)", "GEV (63 day sub-period)"), VaR5.1day = c(VaR5r, VaR5n, VaR5nS, VaR5Q, VaR5E.21, VaR5E.63), VaR5.4day = c(VaR5r4d, NA, VaR5nS4d, VaR5Q4d, VaR5E4d.21, VaR5E4d.63), VaR1.1day = c(VaR1r, VaR1n, VaR1nS, VaR1Q, VaR1E.21, VaR1E.63), VaR1.4day = c(VaR1r4d, NA, VaR1nS4d, VaR1Q4d, VaR1E4d.21, VaR1E4d.63))
+
+VaR.summary
+```
+
+The 4-day VaR is always higher than the 1-day VaR, which makes sense since our uncertainty increases with the prediction horizon. We also see that the actual Econometrics Model gives us a higher VaR when compared to the simulated Econometric Model. The Empirical Quantiles method gives the highest 4-day VaR. The Risk Metrics model gives us the lowest VaR. However, there is an element of randomness in all the methods except the first two, which can cause the results to change every time we run the code.

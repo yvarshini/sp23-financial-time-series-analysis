@@ -1,0 +1,483 @@
+---
+title: "Financial Time Series Analysis HW 04"
+author: "Varshini Yanamandra"
+date: "2023-04-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# libraries
+library(astsa)
+library(TSA)
+library(tidyverse)
+library(fUnitRoots)
+library(tseries)
+```
+
+
+Problem 1. The file UNRATE.csv contains the US monthly unemployment rate data from January
+1948 to February 2019. Use the function read.csv() to load the data. The first column is the
+date and the second column gives the unemployment rate. Denote the original series by {yt}. Fit
+one or a few multiplicative seasonal models ARIMA(p, d, q) × (P, D, Q)s to the data. Since the data
+is monthly, we take s = 12. The orders p, d, q, P, D, Q will be determined through the following
+steps.
+
+```{r}
+# loading data
+unrate <- read.csv('UNRATE.csv')
+head(unrate, 3)
+
+# converting the UNRATE column into a time series object
+yt <- ts(unrate$UNRATE, frequency = 12, start = c(1948, 1))
+```
+
+(a) Create a time series plot and a ACF plot. Comment on your findings.
+
+```{r}
+# time series plot
+plot(yt, ylab = "unemployment rate") # slow-moving; fast increase and gradual decrease
+title(main = "US Monthly Unemployment Rate")
+
+# acf plot
+TSA::acf(as.vector(yt), main = "Sample ACF of the time series yt")
+```
+
+From the time series plot: we see that the time series is not stationary due to non-constant mean and variance. We can also see that there is some seasonality in the graph, as made most obvious by the peaks. We know that the data is monthly data, so we can infer that the seasonality may be 12. The trend in the plot is not monotonic.
+
+From the ACF plot: we see that the ACFs until lag 30, at least, are all significant. In addition, we see that the acf is decaying quite slowly. This leads us to infer that the series is non-stationary, and, more specifically, could also indicate the presence of unit-root non-stationarity, which should be tested using the Augmented Dickey-Fuller test.
+
+(b) Perform an ADF test to check whether there is an unit root. Take a first order difference, i.e.
+d = 1.
+
+```{r}
+# taking the first-order difference (d = 1)
+yt.diff <- diff(yt)
+plot(yt.diff, type = 'l')
+abline(h = 0, col = 'blue')
+abline(v = 25, col = 'red') # differenced series is stationary, except for until the first 25 points
+
+# plotting acf of the first order difference
+TSA::acf(as.vector(yt.diff), main = "Sample ACF of First-Order Difference")
+
+# fitting AR model to yt
+unrate.ar <- ar(yt.diff, method = "mle")
+unrate.ar$order # 12
+
+# Augmented Dickey-Fuller (ADF) Unit-Root test
+adfTest(yt, lag = unrate.ar$order, type = "nc") # type is 'nc' since the mean of the differenced series is 0
+```
+
+We can see that the p-value obtained from the ADT test is 0.3527, which is much greater than 0.05. Hence, we fail to reject the null hypothesis that there is the presence of a unit root. Hence, we can infer that there is unit root non-stationarity in the series yt. Hence, we proceed with the differenced series, 'yt.diff'.
+
+```{r}
+# since we see a large variance in the beginning of the series, we can remove the first few observations to make the analysis more consistent
+yt = yt[c(50:length(yt))]
+plot(diff(yt), type = 'l') # looks good now
+```
+
+(c) In this step you will try to identify p and q. Look at the ACF and PACF at within season
+lags 1, 2, . . . , 11. What model would you use? In other words, what are p and q? You can also
+identify more than one models in this step.
+
+```{r}
+# PACF
+pacf(as.vector(yt.diff), main = "")
+title("Sample PACF of First-Order Difference")
+```
+
+From the ACF plot obtained in part (b), we can see that the lags mostly become insignificant after lag = 6. We can infer the order of the MA process, q = 6 from this. From the PACF plot, we can see that the lags become mostly insignificant after lag = 5. From this, we can infer the order of the AR process, p = 5. So one model we can try fitting is ARMA(5, 6) to the differenced series.
+
+We can also see the seasonality aspect shown in both the plots, since the ACFs and PACFs at lags 12, 24, 36, etc. are significant.
+
+```{r}
+eacf(yt.diff)
+```
+
+We can also try fitting ARMA(1, 5) and MA(6) models to the differeced series.
+
+So the models we will try on the undifferenced series are IMA(1, 6), ARIMA(1, 1, 5) and ARIMA(5, 1, 6).
+
+```{r}
+# model 1: IMA(1, 6)
+m1 <- arima(x = yt, order = c(0, 1, 6))
+
+# model summary
+m1
+# saving the AIC
+aic = m1$aic
+names(aic) = "IMA(1, 6)"
+
+# model diagnostics
+res1 = m1$residuals[7:length(yt)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res1, type = 'l', main = "Residuals of IMA(1, 6) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m1$residuals, lag = 12, type = "Ljung", fitdf = sum(m1$mask)) # very small p-value; residuals not white noise
+p
+# saving the p-value
+LBpval <- p$p.value
+names(LBpval) = "IMA(1, 6)"
+## 3. ACF of the residuals
+TSA::acf(res1, main = "") # significant ACFs at lags 12 and 24 due to seasonality
+title("ACF Plot of Residuals of IMA(1, 6) Model")
+## 4. PACF of the residuals
+pacf(res1, main = "") # significant PACFs at lags 12 and 24 due to seasonality
+title("PACF Plot of Residuals of IMA(1, 6) Model")
+## 5. EACF of the residuals
+eacf(res1) # mostly clean, except for column MA(11) due to seasonality
+```
+
+```{r}
+# model 2: ARIMA(1, 1, 5)
+m2 <- arima(x = yt, order = c(1, 1, 5))
+
+# model summary
+m2
+# saving the AIC
+aic = c(aic, m2$aic)
+names(aic)[length(aic)] = "ARIMA(1, 1, 5)"
+
+# model diagnostics
+res2 = m2$residuals[6:length(yt)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res2, type = 'l', main = "Residuals of ARIMA(1, 1, 5) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m2$residuals, lag = 12, type = "Ljung", fitdf = sum(m2$mask)) # p-value is 0.00016; residuals not white noise
+p
+# saving the p-value
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARIMA(1, 1, 5)"
+## 3. ACF of the residuals
+TSA::acf(res2, main = "") # significant ACFs at lags 12 and 24 due to seasonality
+title("ACF Plot of Residuals of ARIMA(1, 1, 5) Model")
+## 4. PACF of the residuals
+pacf(res2, main = "") # significant PACFs at lags 12 and 24 due to seasonality
+title("PACF Plot of Residuals of ARIMA(1, 1, 5) Model")
+# but the ACF and PACF plots look better than those of the IMA(1, 6) model
+## 5. EACF of the residuals
+eacf(res2) # clean, except for column MA(11) due to seasonality
+```
+
+```{r}
+# model 3: ARIMA(1, 1, 5)
+m3 <- arima(x = yt, order = c(5, 1, 6))
+
+# model summary
+m3
+# saving the AIC
+aic = c(aic, m3$aic)
+names(aic)[length(aic)] = "ARIMA(5, 1, 6)"
+
+# model diagnostics
+res3 = m3$residuals[7:length(yt)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res3, type = 'l', main = "Residuals of ARIMA(5, 1, 6) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m3$residuals, lag = 12, type = "Ljung", fitdf = sum(m3$mask)) # p-value is very small; residuals not white noise
+p
+# saving the p-value
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARIMA(5, 1, 6)"
+## 3. ACF of the residuals
+TSA::acf(res3, main = "") # significant ACFs at lags 12 and 24 due to seasonality
+title("ACF Plot of Residuals of ARIMA(5, 1, 6) Model")
+## 4. PACF of the residuals
+pacf(res3, main = "") # significant PACFs at lags 12 and 24 due to seasonality
+title("PACF Plot of Residuals of ARIMA(5, 1, 6) Model")
+# but the ACF and PACF plots look better than those of the IMA(1, 6) model
+# both plots of ARIMA(1, 1, 5) and ARIMA(5, 1, 6) look to be good, except for the seasonal lags
+## 5. EACF of the residuals
+eacf(res3) # clean, except for a part of column MA(11) due to seasonality
+```
+
+```{r}
+# comparing AICs and p-values from the Ljung-Box test
+rbind(aic, LBpval)
+```
+
+The ARIMA(5, 1, 6) model outperforms the other models based on the AIC value, while the ARIMA(1, 1, 5) has the better p-value for the Ljung-Box test on the residuals. We will continue with these two models for further analysis.
+
+(d) In this step you will try to identify P and Q. Give the ACF and PACF plots of the residuals of
+the models you tried in part (c). Looking at the ACF at seasonal lags, what kind of seasonal
+model would you fit? Looking at the PACF at seasonal lags, what seasonal model would you
+use? You can identify more than one models at this step.
+
+```{r}
+# checking if we need seasonal differencing
+sdy1 <- diff(yt.diff, 12)
+par(mfrow = c(2, 1))
+TSA::acf(yt.diff)
+TSA::acf(sdy1)
+```
+
+The ACF plots indicate that there is no need for seasonal differencing, so we will not try a SARIMA model, but stick with SARMA models. We will start with trying (P, Q) = (1, 0), (0, 1) and (1, 1). If none of these models are satisfactory, we can increase their values by 1 and repeat the analysis.
+
+(e) For each combination of the seasonal component and the regular component you have identified
+in parts (c) and (d), fit the multiplicative seasonal ARIMA(p, 1, q) × (P, 0, Q)12 to the data.
+Pick your final model (you can pick more than one if you can justify that they are comparable).
+
+```{r}
+# ARIMA(1, 1, 5)
+## ACF of the residuals
+TSA::acf(res2, main = "") # significant ACFs at lags 12 and 24 due to seasonality
+title("ACF Plot of Residuals of ARIMA(1, 1, 5) Model")
+## PACF of the residuals
+pacf(res2, main = "") # significant PACFs at lags 12 and 24 due to seasonality
+title("PACF Plot of Residuals of ARIMA(1, 1, 5) Model")
+
+# ARIMA(5, 1, 6)
+## ACF of the residuals
+TSA::acf(res3, main = "") # significant ACFs at lags 12 and 24 due to seasonality
+title("ACF Plot of Residuals of ARIMA(5, 1, 6) Model")
+## PACF of the residuals
+pacf(res3, main = "") # significant PACFs at lags 12 and 24 due to seasonality
+title("PACF Plot of Residuals of ARIMA(5, 1, 6) Model")
+```
+
+There are significant ACFs and PACFs at lags 12, 24, etc. for both the models. This is due to the seasonality present in the time series data. We will now try fitting a seasonal component to the models in addition to the ARIMA part.
+
+```{r}
+# model 4: ARIMA(1, 1, 5) + SAR(1)
+m4 <- arima(yt, order = c(1, 1, 5), seasonal = list(order = c(1, 0, 0), period = 12))
+
+# model summary
+m4
+# saving the AIC
+aic = c(aic, m4$aic)
+names(aic)[length(aic)] = "ARIMA(1, 1, 5) + SAR(1)"
+
+# model diagnostics
+res4 = m4$residuals[6:length(yt)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res4, type = 'l', main = "Residuals of ARIMA(1, 1, 5) + SAR(1) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m4$residuals, lag = 12, type = "Ljung", fitdf = sum(m4$mask)) # p-value is 0.2035; fail to reject H0
+p
+# saving the p-value, which looks good
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARIMA(1, 1, 5) + SAR(1)"
+## 3. ACF of the residuals
+TSA::acf(res4, main = "") # fails to deal with lag 24
+title("ACF Plot of Residuals of ARIMA(1, 1, 5) + SAR(1) Model")
+## 4. PACF of the residuals
+pacf(res4, main = "") # fails to deal with lag 24
+title("PACF Plot of Residuals of ARIMA(1, 1, 5) + SAR(1) Model")
+## 5. EACF of the residuals
+eacf(res4) # clean
+```
+
+```{r}
+# model 5: ARIMA(1, 1, 5) + SMA(1)
+m5 <- arima(yt, order = c(1, 1, 5), seasonal = list(order = c(0, 0, 1), period = 12))
+
+# model summary
+m5
+# saving the AIC
+aic = c(aic, m5$aic)
+names(aic)[length(aic)] = "ARIMA(1, 1, 5) + SMA(1)"
+
+# model diagnostics
+res5 = m5$residuals[6:length(yt)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res5, type = 'l', main = "Residuals of ARIMA(1, 1, 5) + SMA(1) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m5$residuals, lag = 12, type = "Ljung", fitdf = sum(m5$mask)) # p-value is 0.07154; fail to reject H0
+p
+# saving the p-value, which looks good
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARIMA(1, 1, 5) + SMA(1)"
+## 3. ACF of the residuals
+TSA::acf(res5, main = "") # fails to deal with lag 24, and some more significant ACFs at other lags
+title("ACF Plot of Residuals of ARIMA(1, 1, 5) + SMA(1) Model")
+## 4. PACF of the residuals
+pacf(res5, main = "") # fails to deal with lag 24, and some more significant PACFs at other lags
+title("PACF Plot of Residuals of ARIMA(1, 1, 5) + SMA(1) Model")
+## 5. EACF of the residuals
+eacf(res5) # clean
+```
+
+```{r}
+# model 6: ARIMA(1, 1, 5) + SARMA(1, 1)
+m6 <- arima(yt, order = c(1, 1, 5), seasonal = list(order = c(1, 0, 1), period = 12))
+
+# model summary
+m6
+# saving the AIC
+aic = c(aic, m6$aic)
+names(aic)[length(aic)] = "ARIMA(1, 1, 5) + SARMA(1, 1)"
+
+# model diagnostics
+res6 = m6$residuals[6:length(yt)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res6, type = 'l', main = "Residuals of ARIMA(1, 1, 5) + SARMA(1, 1) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m6$residuals, lag = 12, type = "Ljung", fitdf = sum(m6$mask)) # p-value is 0.0848; fail to reject H0
+p
+# saving the p-value, which looks good
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARIMA(1, 1, 5) + SARMA(1, 1)"
+## 3. ACF of the residuals
+TSA::acf(res6, main = "") # looks good other than a few slightly siginificant lags
+title("ACF Plot of Residuals of ARIMA(1, 1, 5) + SARMA(1, 1) Model")
+## 4. PACF of the residuals
+pacf(res6, main = "") # looks good other than a few slightly siginificant lags
+title("PACF Plot of Residuals of ARIMA(1, 1, 5) + SARMA(1, 1) Model")
+## 5. EACF of the residuals
+eacf(res6) # clean
+```
+
+```{r}
+# model 7: ARIMA(5, 1, 6) + SAR(1)
+m7 <- arima(yt, order = c(5, 1, 6), seasonal = list(order = c(1, 0, 0), period = 12))
+
+# model summary
+m7
+# saving the AIC
+aic = c(aic, m7$aic)
+names(aic)[length(aic)] = "ARIMA(5, 1, 6) + SAR(1)"
+
+# model diagnostics
+res7 = m7$residuals[7:length(yt)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res7, type = 'l', main = "Residuals of ARIMA(5, 1, 6) + SAR(1) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m7$residuals, lag = 12, type = "Ljung", fitdf = sum(m7$mask)) # very small p-value; residuals not white noise
+p
+# saving the p-value, which looks good
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARIMA(5, 1, 6) + SAR(1)"
+## 3. ACF of the residuals
+TSA::acf(res7, main = "") # fails to deal with lag 24
+title("ACF Plot of Residuals of ARIMA(5, 1, 6) + SAR(1) Model")
+## 4. PACF of the residuals
+pacf(res7, main = "") # fails to deal with lag 24
+title("PACF Plot of Residuals of ARIMA(5, 1, 6) + SAR(1) Model")
+## 5. EACF of the residuals
+eacf(res7) # clean
+```
+
+```{r}
+# model 8: ARIMA(5, 1, 6) + SMA(1)
+m8 <- arima(yt, order = c(5, 1, 6), seasonal = list(order = c(0, 0, 1), period = 12))
+
+# model summary
+m8
+# saving the AIC
+aic = c(aic, m8$aic)
+names(aic)[length(aic)] = "ARIMA(5, 1, 6) + SMA(1)"
+
+# model diagnostics
+res8 = m8$residuals[7:length(yt)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res8, type = 'l', main = "Residuals of ARIMA(5, 1, 6) + SMA(1) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m8$residuals, lag = 12, type = "Ljung", fitdf = sum(m8$mask)) # very small p-value; residuals not white noise
+p
+# saving the p-value, which looks good
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARIMA(5, 1, 6) + SMA(1)"
+## 3. ACF of the residuals
+TSA::acf(res8, main = "") # fails to deal with lag 24
+title("ACF Plot of Residuals of ARIMA(5, 1, 6) + SMA(1) Model")
+## 4. PACF of the residuals
+pacf(res8, main = "") # fails to deal with lag 24
+title("PACF Plot of Residuals of ARIMA(5, 1, 6) + SMA(1) Model")
+## 5. EACF of the residuals
+eacf(res8) # clean
+```
+
+```{r}
+# model 9: ARIMA(5, 1, 6) + SARMA(1, 1)
+m9 <- arima(yt, order = c(5, 1, 6), seasonal = list(order = c(1, 0, 1), period = 12))
+
+# model summary
+m9
+# saving the AIC
+aic = c(aic, m9$aic)
+names(aic)[length(aic)] = "ARIMA(5, 1, 6) + SARMA(1, 1)"
+
+# model diagnostics
+res9 = m9$residuals[7:length(yt)]
+
+## 1. Plotting the residuals to check for stationarity
+plot(res9, type = 'l', main = "Residuals of ARIMA(5, 1, 6) + SARMA(1, 1) Model") # looks to be stationary
+## 2. Ljung-Box test
+p <- Box.test(m9$residuals, lag = 12, type = "Ljung", fitdf = sum(m9$mask)) # p-value is 'NA'; residuals not white noise
+p
+# saving the p-value, which looks good
+LBpval <- c(LBpval, p$p.value)
+names(LBpval)[length(LBpval)] = "ARIMA(5, 1, 6) + SARMA(1, 1)"
+## 3. ACF of the residuals
+TSA::acf(res9, main = "") # significant ACF at lag 14
+title("ACF Plot of Residuals of ARIMA(5, 1, 6) + SARMA(1, 1) Model")
+## 4. PACF of the residuals
+pacf(res9, main = "") # significant PACF at lag 14
+title("PACF Plot of Residuals of ARIMA(5, 1, 6) + SARMA(1, 1) Model")
+## 5. EACF of the residuals
+eacf(res9) # mostly clean, except for column 9
+```
+
+(f) Report the final fitted model (or models), and check the adequacy. You should try all diagnostics that are applicable.
+
+```{r}
+# comparing AIC and p-values of the Ljung-Box test
+rbind(aic, LBpval)
+```
+The ARIMA(1, 1, 5) + SAR(1) model outperforms all the other models based on p-value of the Ljung-Box test.
+
+The ARIMA(1, 1, 5) + SARMA(1, 1) model outperforms all the other models based on AIC. Since the p-value of the Ljung-Box test is acceptable and all the diagnostics also look good, this will be the final model. The diagnostics have been repeated from part (e) here for the sake of reporting.
+
+```{r}
+# the final model is m6: ARIMA(1, 1, 5) + SARMA(1, 1)
+m6 # model summary
+
+# model diagnostics
+## 1. Plotting the residuals to check for stationarity
+plot(res6, type = 'l', main = "Residuals of ARIMA(1, 1, 5) + SARMA(1, 1) Model") # looks to be stationary
+abline(h = 0, col = "blue", lty = 2)
+## 2. Ljung-Box test
+p <- Box.test(m6$residuals, lag = 12, type = "Ljung", fitdf = sum(m6$mask)) # p-value is 0.202; fail to reject H0
+p
+## 3. ACF of the residuals
+TSA::acf(res6, main = "") # looks good; mostly all are close to the confidence boundaries
+title("ACF Plot of Residuals of ARIMA(1, 1, 5) + SARMA(1, 1) Model")
+## 4. PACF of the residuals
+pacf(res6, main = "") # looks good; mostly all are close to the confidence boundaries
+title("PACF Plot of Residuals of ARIMA(1, 1, 5) + SARMA(1, 1) Model")
+## 5. EACF of the residuals
+eacf(res6) # clean
+
+## some more diagnostics using astsa::sarima
+astsa::sarima(yt, 1, 1, 5, 1, 0, 1, 12, no.constant = TRUE)
+```
+
+(g) Use the final model (or models) to forecast the unemployment rates of the next 12 months.
+Plot the forecasts and the 95% forecast intervals.
+
+```{r}
+unemp.forecast = predict(m6, 12) # predictions for the next 12 months
+
+# plot
+l = length(yt)
+span = time(yt)[l - 11:0]
+xx = window(yt, span[1], span[12] + 12, extend = T)
+xx[12 + 1:12] = unemp.forecast$pred[1:12]
+rr = range(c(xx, unemp.forecast$pred + 1.96 * unemp.forecast$se, unemp.forecast$pred - 1.96 * unemp.forecast$se))
+ts.plot(xx, type = "o", main = "12-step prediction using ARIMA(1, 1, 5) + SARMA(1, 1) model", ylim = rr, ylab = "Value")
+lines(span[12] + 1:12, unemp.forecast$pred + 1.96 * unemp.forecast$se, lty = 2)
+lines(span[12] + 1:12, unemp.forecast$pred - 1.96 * unemp.forecast$se, lty = 2)
+abline(v = span[12], lty = 2)
+```
+
